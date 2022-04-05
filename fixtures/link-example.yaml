@@ -175,6 +175,8 @@ components:
         username: $response.body#/author/username
         slug: $response.body#/repository/slug
         pid: $response.body#/id
+    NoParams:
+      operationRef: xyz
   schemas: 
     user: 
       type: object

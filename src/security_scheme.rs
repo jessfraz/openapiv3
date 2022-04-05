@@ -13,29 +13,37 @@ pub enum SecurityScheme {
         #[serde(rename = "in")]
         location: APIKeyLocation,
         name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
     #[serde(rename = "http")]
     HTTP {
         scheme: String,
         #[serde(rename = "bearerFormat")]
         bearer_format: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
     #[serde(rename = "oauth2")]
-    OAuth2 { flows: OAuth2Flows },
+    OAuth2 {
+        flows: OAuth2Flows,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
     #[serde(rename = "openIdConnect")]
     OpenIDConnect {
         #[serde(rename = "openIdConnectUrl")]
         open_id_connect_url: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum APIKeyLocation {
-    #[serde(rename = "query")]
     Query,
-    #[serde(rename = "header")]
     Header,
-    #[serde(rename = "cookie")]
     Cookie,
 }
 
@@ -53,41 +61,33 @@ pub struct OAuth2Flows {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum OAuth2Flow {
-    #[serde(rename = "implicit")]
+    #[serde(rename_all = "camelCase")]
     Implicit {
-        #[serde(rename = "authorizationUrl")]
         authorization_url: String,
-        #[serde(rename = "refreshUrl")]
         refresh_url: Option<String>,
         #[serde(default)]
         scopes: IndexMap<String, String>,
     },
-    #[serde(rename = "password")]
+    #[serde(rename_all = "camelCase")]
     Password {
-        #[serde(rename = "refreshUrl")]
         refresh_url: Option<String>,
-        #[serde(rename = "tokenUrl")]
         token_url: String,
         #[serde(default)]
         scopes: IndexMap<String, String>,
     },
-    #[serde(rename = "clientCredentials")]
+    #[serde(rename_all = "camelCase")]
     ClientCredentials {
-        #[serde(rename = "refreshUrl")]
         refresh_url: Option<String>,
-        #[serde(rename = "tokenUrl")]
         token_url: String,
         #[serde(default)]
         scopes: IndexMap<String, String>,
     },
-    #[serde(rename = "authorizationCode")]
+    #[serde(rename_all = "camelCase")]
     AuthorizationCode {
-        #[serde(rename = "authorizationUrl")]
         authorization_url: String,
-        #[serde(rename = "tokenUrl")]
         token_url: String,
-        #[serde(rename = "refreshUrl")]
         refresh_url: Option<String>,
         #[serde(default)]
         scopes: IndexMap<String, String>,

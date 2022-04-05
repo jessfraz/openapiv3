@@ -25,6 +25,9 @@ pub struct SchemaData {
     pub discriminator: Option<Discriminator>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
+    /// Inline extensions to this object.
+    #[serde(flatten, deserialize_with = "crate::util::deserialize_extensions")]
+    pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -51,6 +54,9 @@ pub enum SchemaKind {
         #[serde(rename = "anyOf")]
         any_of: Vec<ReferenceOr<Schema>>,
     },
+    Not {
+        not: Box<ReferenceOr<Schema>>,
+    },
     Any(AnySchema),
 }
 
@@ -72,9 +78,13 @@ pub enum AdditionalProperties {
     Schema(Box<ReferenceOr<Schema>>),
 }
 
+/// Catch-all for any combination of properties that doesn't correspond to one
+/// of the predefined subsets.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AnySchema {
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub typ: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,8 +115,22 @@ pub struct AnySchema {
     pub max_items: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unique_items: Option<bool>,
+    #[serde(rename = "enum", default, skip_serializing_if = "Vec::is_empty")]
+    pub enumeration: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub one_of: Vec<ReferenceOr<Schema>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<ReferenceOr<Schema>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<ReferenceOr<Schema>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not: Option<Box<ReferenceOr<Schema>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -140,7 +164,7 @@ pub struct NumberType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum: Option<f64>,
     #[serde(rename = "enum", default, skip_serializing_if = "Vec::is_empty")]
-    pub enumeration: Vec<f64>,
+    pub enumeration: Vec<Option<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -159,7 +183,7 @@ pub struct IntegerType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum: Option<i64>,
     #[serde(rename = "enum", default, skip_serializing_if = "Vec::is_empty")]
-    pub enumeration: Vec<i64>,
+    pub enumeration: Vec<Option<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -213,4 +237,64 @@ pub enum StringFormat {
     Password,
     Byte,
     Binary,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::{AnySchema, Schema, SchemaData, SchemaKind};
+
+    #[test]
+    fn test_schema_with_extensions() {
+        let schema = serde_json::from_str::<Schema>(
+            r#"{
+                "type": "boolean",
+                "x-foo": "bar"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            schema.schema_data.extensions.get("x-foo"),
+            Some(&json!("bar"))
+        );
+    }
+
+    #[test]
+    fn test_any() {
+        let value = json! { {} };
+        serde_json::from_value::<AnySchema>(value).unwrap();
+    }
+
+    #[test]
+    fn test_not() {
+        let value = json! {
+            {
+                "not": {}
+            }
+        };
+
+        let schema = serde_json::from_value::<Schema>(value).unwrap();
+        assert!(matches!(schema.schema_kind, SchemaKind::Not { not: _ }));
+    }
+
+    #[test]
+    fn test_null() {
+        let value = json! {
+            {
+                "nullable": true,
+                "enum": [ null ],
+            }
+        };
+
+        let schema = serde_json::from_value::<Schema>(value).unwrap();
+        assert!(matches!(
+            &schema.schema_data,
+            SchemaData { nullable: true, .. }
+        ));
+        assert!(matches!(
+            &schema.schema_kind,
+            SchemaKind::Any(AnySchema { enumeration, .. }) if enumeration[0] == json!(null)));
+    }
 }

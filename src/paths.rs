@@ -1,6 +1,8 @@
+use std::marker::PhantomData;
+
 use crate::*;
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Describes the operations available on a single path.
 /// A Path Item MAY be empty, due to ACL constraints.
@@ -9,6 +11,14 @@ use serde::{Deserialize, Serialize};
 /// parameters are available.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct PathItem {
+    /// An optional, string summary, intended to apply to all operations in
+    /// this path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// An optional, string description, intended to apply to all operations in
+    /// this path. CommonMark syntax MAY be used for rich text representation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub get: Option<Operation>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -26,8 +36,7 @@ pub struct PathItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Operation>,
     /// An alternative server array to service all operations in this path.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub servers: Vec<Server>,
     /// A list of parameters that are applicable for all the
     /// operations described under this path. These parameters
@@ -40,24 +49,49 @@ pub struct PathItem {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ReferenceOr<Parameter>>,
     /// Inline extensions to this object.
-    #[serde(flatten)]
+    #[serde(flatten, deserialize_with = "crate::util::deserialize_extensions")]
     pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 impl PathItem {
-    pub fn iter(&self) -> impl Iterator<Item = &Operation> + '_ {
+    /// Returns an iterator of references to the [Operation]s in the [PathItem].
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &'_ Operation)> {
         vec![
-            &self.get,
-            &self.put,
-            &self.post,
-            &self.delete,
-            &self.options,
-            &self.head,
-            &self.patch,
-            &self.trace,
+            ("get", &self.get),
+            ("put", &self.put),
+            ("post", &self.post),
+            ("delete", &self.delete),
+            ("options", &self.options),
+            ("head", &self.head),
+            ("patch", &self.patch),
+            ("trace", &self.trace),
         ]
         .into_iter()
-        .flat_map(Option::iter)
+        .filter_map(|(method, maybe_op)| maybe_op.as_ref().map(|op| (method, op)))
+    }
+}
+
+impl IntoIterator for PathItem {
+    type Item = (&'static str, Operation);
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    /// Returns an iterator of the [Operation]s in the [PathItem].
+    fn into_iter(self) -> Self::IntoIter {
+        vec![
+            ("get", self.get),
+            ("put", self.put),
+            ("post", self.post),
+            ("delete", self.delete),
+            ("options", self.options),
+            ("head", self.head),
+            ("patch", self.patch),
+            ("trace", self.trace),
+        ]
+        .into_iter()
+        .filter_map(|(method, maybe_op)| maybe_op.map(|op| (method, op)))
+        .collect::<Vec<_>>()
+        .into_iter()
     }
 }
 
@@ -65,4 +99,72 @@ impl PathItem {
 /// their operations. The path is appended to the URL from the
 /// Server Object in order to construct the full URL. The Paths
 /// MAY be empty, due to ACL constraints.
-pub type Paths = IndexMap<String, ReferenceOr<PathItem>>;
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct Paths {
+    /// A map of PathItems or references to them.
+    #[serde(flatten, deserialize_with = "deserialize_paths")]
+    pub paths: IndexMap<String, ReferenceOr<PathItem>>,
+    /// Inline extensions to this object.
+    #[serde(flatten, deserialize_with = "crate::util::deserialize_extensions")]
+    pub extensions: IndexMap<String, serde_json::Value>,
+}
+
+impl Paths {
+    /// Iterate over path items.
+    pub fn iter(&self) -> indexmap::map::Iter<String, ReferenceOr<PathItem>> {
+        self.paths.iter()
+    }
+}
+
+impl IntoIterator for Paths {
+    type Item = (String, ReferenceOr<PathItem>);
+
+    type IntoIter = indexmap::map::IntoIter<String, ReferenceOr<PathItem>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.paths.into_iter()
+    }
+}
+
+fn deserialize_paths<'de, D>(
+    deserializer: D,
+) -> Result<IndexMap<String, ReferenceOr<PathItem>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserializer.deserialize_map(PredicateVisitor(
+        |key: &String| key.starts_with('/'),
+        PhantomData,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_item_iterators() {
+        let operation = Operation::default();
+
+        let path_item = PathItem {
+            get: Some(operation.clone()),
+            post: Some(operation.clone()),
+            delete: Some(operation.clone()),
+            ..Default::default()
+        };
+
+        let expected = vec![
+            ("get", &operation),
+            ("post", &operation),
+            ("delete", &operation),
+        ];
+        assert_eq!(path_item.iter().collect::<Vec<_>>(), expected);
+
+        let expected = vec![
+            ("get", operation.clone()),
+            ("post", operation.clone()),
+            ("delete", operation.clone()),
+        ];
+        assert_eq!(path_item.into_iter().collect::<Vec<_>>(), expected);
+    }
+}
